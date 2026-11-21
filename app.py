@@ -7,6 +7,7 @@ import os
 import hashlib
 from datetime import datetime
 from supabase import create_client
+from io import BytesIO
 
 # 🔐 Credenziali Supabase
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -20,35 +21,26 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # --- FUNZIONI DI AUTENTICAZIONE ---
 def hash_password(password):
-    """Crea hash SHA-256 della password."""
     return hashlib.sha256(password.encode()).hexdigest()
 
 def verifica_login(username, password):
-    """Verifica credenziali utente."""
     try:
         response = supabase.table('utenti').select('*').eq('username', username).eq('attivo', True).execute()
         if not response.data:
             return None, "Utente non trovato o disattivato"
-        
         utente = response.data[0]
         if utente['password_hash'] != hash_password(password):
             return None, "Password errata"
-        
-        # Aggiorna ultimo accesso
         supabase.table('utenti').update({'ultimo_accesso': datetime.now().isoformat()}).eq('id', utente['id']).execute()
-        
         return utente, None
     except Exception as e:
         return None, f"Errore: {e}"
 
 def cambia_password_admin(username_admin, username_target, nuova_password):
-    """L'admin cambia la password di un utente."""
     try:
-        # Verifica che chi fa la modifica sia admin
         response = supabase.table('utenti').select('ruolo').eq('username', username_admin).execute()
         if not response.data or response.data[0]['ruolo'] != 'admin':
             return False, "Non hai i privilegi di amministratore"
-        
         nuovo_hash = hash_password(nuova_password)
         supabase.table('utenti').update({'password_hash': nuovo_hash}).eq('username', username_target).execute()
         return True, f"Password aggiornata per {username_target}"
@@ -56,12 +48,10 @@ def cambia_password_admin(username_admin, username_target, nuova_password):
         return False, f"Errore: {e}"
 
 def crea_utente_admin(username_creatore, username, password, nome_completo, prefisso, ruolo='tecnico'):
-    """L'admin crea un nuovo utente."""
     try:
         response = supabase.table('utenti').select('ruolo').eq('username', username_creatore).execute()
         if not response.data or response.data[0]['ruolo'] != 'admin':
             return False, "Solo gli admin possono creare utenti"
-        
         supabase.table('utenti').insert({
             'username': username,
             'password_hash': hash_password(password),
@@ -75,12 +65,10 @@ def crea_utente_admin(username_creatore, username, password, nome_completo, pref
         return False, f"Errore: {e}"
 
 def disattiva_utente_admin(username_admin, username_target):
-    """L'admin disattiva un utente."""
     try:
         response = supabase.table('utenti').select('ruolo').eq('username', username_admin).execute()
         if not response.data or response.data[0]['ruolo'] != 'admin':
             return False, "Solo gli admin possono disattivare utenti"
-        
         supabase.table('utenti').update({'attivo': False}).eq('username', username_target).execute()
         return True, f"Utente {username_target} disattivato"
     except Exception as e:
@@ -127,7 +115,6 @@ def carica_dati(filtro_tecnico=None, filtro_stato=None, filtro_region=None, data
         return pd.DataFrame()
 
 def carica_utenti():
-    """Carica lista utenti attivi."""
     try:
         response = supabase.table('utenti').select('*').eq('attivo', True).execute()
         return response.data if response.data else []
@@ -140,7 +127,6 @@ TIPI_DOC = ['PREVENTIVO', 'CONSUNTIVO']
 STATI = ['INVIATO IN ATTESA ODS', 'REALIZZATO', 'REALIZZATO E FATTURATO', 'RESPINTO', 'SOSPESO']
 REGIONI = ['Tutti', 'Emilia-Romagna', 'Toscana/Marche/Umbria']
 
-# Palette colori professionali
 COLORI_PERSONE = {
     'Bonazza': '#FF6B6B',
     'Espa': '#4ECDC4',
@@ -218,7 +204,6 @@ st.sidebar.info(f"**Ruolo:** {'👑 Amministratore' if is_admin else '🔧 Tecni
 
 st.sidebar.divider()
 
-# Menu admin
 if is_admin:
     st.sidebar.subheader("👑 Pannello Admin")
     menu_admin = st.sidebar.radio(
@@ -258,7 +243,6 @@ if menu_admin == "⚙️ Gestione Utenti" and is_admin:
             cols_mostra = ['username', 'nome_completo', 'prefisso', 'ruolo', 'ultimo_accesso']
             st.dataframe(df_utenti[cols_mostra], use_container_width=True)
             
-            # Disattiva utente
             st.markdown("---")
             st.subheader("🚫 Disattiva utente")
             utenti_attivi = [u['username'] for u in utenti_lista if u['username'] != utente['username']]
@@ -362,7 +346,6 @@ elif menu_admin == "📊 Dashboard":
     if df_all.empty:
         st.info("📭 Nessun documento presente.")
     else:
-        # KPI principali
         kpi1, kpi2, kpi3, kpi4 = st.columns(4)
         with kpi1:
             st.metric("📄 Documenti Totali", len(df_all))
@@ -376,7 +359,6 @@ elif menu_admin == "📊 Dashboard":
         
         st.divider()
         
-        # GRAFICO 1: Fatturato per Persona (BARRE COLORATE)
         st.subheader("💰 Fatturato per Tecnico")
         fatt_tecnici = df_all.groupby('tecnico')['importo'].sum().reset_index().sort_values('importo', ascending=False)
         fatt_tecnici['colore'] = fatt_tecnici['tecnico'].map(COLORI_PERSONE)
@@ -400,7 +382,6 @@ elif menu_admin == "📊 Dashboard":
         )
         st.plotly_chart(fig1, use_container_width=True)
         
-        # GRAFICO 2: Fatturato per Regione (BARRE COLORATE)
         st.subheader("🗺️ Fatturato per Regione")
         fatt_regioni = df_all.groupby('regione')['importo'].sum().reset_index()
         fatt_regioni['colore'] = fatt_regioni['regione'].map(COLORI_REGIONI)
@@ -424,7 +405,6 @@ elif menu_admin == "📊 Dashboard":
         )
         st.plotly_chart(fig2, use_container_width=True)
         
-        # GRAFICO 3: Distribuzione per Persona (TORTA COLORATA)
         st.subheader("🥧 Distribuzione Documenti per Tecnico")
         count_tecnici = df_all['tecnico'].value_counts().reset_index()
         count_tecnici.columns = ['tecnico', 'count']
@@ -440,7 +420,6 @@ elif menu_admin == "📊 Dashboard":
         fig3.update_layout(title='Numero documenti per tecnico', template='plotly_white')
         st.plotly_chart(fig3, use_container_width=True)
         
-        # GRAFICO 4: Distribuzione per Regione (TORTA COLORATA)
         st.subheader("🥧 Distribuzione per Regione")
         count_regioni = df_all['regione'].value_counts().reset_index()
         count_regioni.columns = ['regione', 'count']
@@ -456,7 +435,6 @@ elif menu_admin == "📊 Dashboard":
         fig4.update_layout(title='Numero documenti per regione', template='plotly_white')
         st.plotly_chart(fig4, use_container_width=True)
         
-        # GRAFICO 5: Fatturato per Stato (BARRE COLORATE)
         st.subheader("📊 Fatturato per Stato Documento")
         fatt_stati = df_all.groupby('stato_documento')['importo'].sum().reset_index()
         fatt_stati['colore'] = fatt_stati['stato_documento'].map(COLORI_STATI)
@@ -480,7 +458,6 @@ elif menu_admin == "📊 Dashboard":
         )
         st.plotly_chart(fig5, use_container_width=True)
         
-        # GRAFICO 6: Fatturato per Tipologia (BARRE COLORATE)
         st.subheader("🏷️ Fatturato per Tipologia Richiesta")
         fatt_tip = df_all.groupby('tipologia_richiesta')['importo'].sum().reset_index()
         fatt_tip['colore'] = fatt_tip['tipologia_richiesta'].map(COLORI_TIPOLOGIE)
@@ -566,7 +543,7 @@ elif menu_admin == "📋 Elenco":
     
     col1, col2, col3 = st.columns(3)
     with col1:
-        filtro_tecnico = st.selectbox("Filtra tecnico:", ['Tutti', utente['nome_completo']] if not is_admin else ['Tutti'] + list(set(df['tecnico'] for df in [carica_dati()] if not df.empty else [])), key='tec_elenco')
+        filtro_tecnico = st.selectbox("Filtra tecnico:", ['Tutti'], key='tec_elenco')
     with col2:
         filtro_stato = st.selectbox("Filtra stato:", ['Tutti'] + STATI, key='stato_elenco')
     with col3:
@@ -670,7 +647,6 @@ elif menu_admin == "🖨️ Export":
     else:
         st.info(f"📊 **{len(df_all)} documenti** - Fatturato: **€ {df_all['importo'].sum():,.2f}**")
         
-        from io import BytesIO
         output = BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
             df_all.to_excel(writer, sheet_name='Preventivi', index=False)
